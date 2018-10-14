@@ -1,3 +1,6 @@
+# data directory is soft-linked, ignore from tracking.
+data
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -26,7 +26,9 @@ class Trainer(BaseTrainer):
         acc_metrics = np.zeros(len(self.metrics))
         for i, metric in enumerate(self.metrics):
             acc_metrics[i] += metric(output, target)
-            self.writer.add_scalar(f'{metric.__name__}', acc_metrics[i])
+            # Python3.6 usage of f-string?
+            #self.writer.add_scalar(f'{metric.__name__}', acc_metrics[i])
+            self.writer.add_scalar('metric.__name__', acc_metrics[i])
         return acc_metrics
 
     def _train_epoch(self, epoch):
