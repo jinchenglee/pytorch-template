@@ -44,7 +44,7 @@ def main(config, resume):
     trainer.train()
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='PyTorch Template')
+    parser = argparse.ArgumentParser(description='PyTorch Visual Perception')
     parser.add_argument('-c', '--config', default=None, type=str,
                            help='config file path (default: None)')
     parser.add_argument('-r', '--resume', default=None, type=str,
