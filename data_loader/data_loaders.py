@@ -74,18 +74,18 @@ class MyDataLoader(BaseDataLoader):
     """
     Data loading using BaseDataLoader.
     """
-    def __init__(self, batch_size, shuffle, validation_split, num_workers, training=True):
+    def __init__(self, data_dir, batch_size, shuffle, validation_split, num_workers, training=True):
         trsfm = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,))
             ])
 
         # TODO: make these configurable from .json config file
-        IMG_PATH = './data/combined-jpg/'
+        IMG_PATH = data_dir + 'combined-jpg/'
         IMG_EXT = '.jpg'
-        TRAIN_DATA = './data/train_v4.csv'
+        TRAIN_DATA = data_dir + 'train_v4.csv'
         # TODO: how to lead test dataset?
-        TEST_DATA = './data/test_v4.csv'
+        TEST_DATA = data_dir + 'test_v4.csv'
 
         self.dataset = MyDataset(TRAIN_DATA, IMG_PATH, IMG_EXT, trsfm)
         super(MyDataLoader, self).__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)

@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models as models
 from base import BaseModel
 
 
@@ -20,3 +21,21 @@ class MnistModel(BaseModel):
         x = F.dropout(x, training=self.training)
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
+
+class MyModel(BaseModel):
+    def __init__(self, num_classes=3):
+        super(MyModel, self).__init__()
+        # Get pretrained VGG16 model
+        vgg16_model = models.vgg16(pretrained=True)
+        # Get features from VGG16
+        self.features = vgg16_model.features
+        # Remove the last two layers (fc and activation)
+        self.classifier = nn.Sequential(
+            nn.Linear(61440, 3)
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        x = self.classifier(x)
+        return F.logsigmoid(x)
