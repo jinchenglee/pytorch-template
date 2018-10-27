@@ -50,9 +50,11 @@ class MyDataset(Dataset):
         assert tmp_df['image_name'].apply(lambda x: os.path.isfile(img_path + x + img_ext)).all(), \
                 "Some images referenced in the CSV file were not found"
         
+        # TODO: How to load target from CVS with 3 classes instead of 4?
         self.mlb = MultiLabelBinarizer()
         self.img_path = img_path
         self.img_ext = img_ext
+        # Normalize input
         self.transform = transform
 
         self.X_train = tmp_df['image_name']
@@ -77,7 +79,7 @@ class MyDataLoader(BaseDataLoader):
     def __init__(self, data_dir, batch_size, shuffle, validation_split, num_workers, training=True):
         trsfm = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
 
         # TODO: make these configurable from .json config file

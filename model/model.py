@@ -31,11 +31,12 @@ class MyModel(BaseModel):
         self.features = vgg16_model.features
         # Remove the last two layers (fc and activation)
         self.classifier = nn.Sequential(
-            nn.Linear(61440, 3)
+            # TODO: How to load target from CVS with 3 classes instead of 4?
+            nn.Linear(61440, 4)
         )
 
     def forward(self, x):
         x = self.features(x)
         x = x.view(x.size(0), -1)
         x = self.classifier(x)
-        return F.logsigmoid(x)
+        return F.sigmoid(x)
