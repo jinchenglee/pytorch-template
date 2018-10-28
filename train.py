@@ -8,6 +8,7 @@ import model.metric as module_metric
 import model.model as module_arch
 from trainer import Trainer
 from utils import Logger
+from torchsummary import summary
 
 
 def get_instance(module, name, config, *args):
@@ -43,6 +44,9 @@ def main(config, resume):
                       valid_data_loader=valid_data_loader,
                       lr_scheduler=lr_scheduler,
                       train_logger=train_logger)
+
+    # Print out the keras-style model summary here - after data put to cuda/device side
+    summary(model, input_size=(3, 272, 480))
 
     trainer.train()
 
