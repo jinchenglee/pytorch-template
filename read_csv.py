@@ -17,35 +17,39 @@ from PIL import Image, ImageDraw
 import imgaug as ia
 import imgaug.augmenters as iaa
 import imageio
- 
 
-EXPORT_PATH = './data/combined-jpg'
-all_rows = []
-with open('tmp.csv', 'r', newline='') as csvfile:
-    csvreader = csv.reader(csvfile, delimiter=',',
-                       quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    for row in csvreader:
-        all_rows.append(row)
+# Augmentation
+ia.seed(1)
+
+# Define our augmentation pipeline.
+seq = iaa.Sequential([
+    # iaa.Fliplr(0.5), # 50% change horizontal flipping
+    iaa.Add((-20, 20)), # Add random values between -20 and 20 to images
+    iaa.ContrastNormalization((0.9, 1.1)), # Normalize contrast by a factor of 0.9 to 1.1
+    # RGB->HSV, random shift, then HSV->RGB
+    iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
+    iaa.WithChannels(0, iaa.Add((0, 30))),
+    iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB"),
+    # Affine
+    iaa.Affine(
+        rotate=(-10, 10),  # rotate by -10 to 10 degrees (affects heatmaps)
+        translate_px={"x": (-50, 50), "y": (-25, 25)}, # translation in pixels
+        scale={"x": (0.9, 1.1), "y": (0.9, 1.1)}, # Scaling +/-20%
+        shear=(-5, 5) # Shear by +/-5%
+    )
+], random_order=False)
 
 
-# Randomly pick several images
-NUM_IMAGES_PER_ROUND = 5
-DILATION_ON = True
-DILATE_PIXELS = 2
-random_idx = randint(0, len(all_rows), NUM_IMAGES_PER_ROUND)
 
-images = []
-segmaps_car = []
-segmaps_rider = []
-segmaps_ped = []
-masks_car = []
-masks_rider = []
-masks_ped = []
-
-raw_width = 1920
-raw_height = 1208
-
-for idx in random_idx:
+def parse_row(row):
+    """
+    Parse a row read from label record CSV file. Deal with some anomaly cases in 
+    the meantime. 
+    
+    Return these parameters:
+        frame_file_name, tags, len_box, box_ids, box_classes, box_vertices,
+        len_poly, poly_ids, poly_classes, poly_vertices
+    """
     frame_file_name, tags, box_ids, box_classes, box_vertices,\
         poly_ids, poly_classes, poly_vertices = all_rows[idx]
 
@@ -77,33 +81,17 @@ for idx in random_idx:
         if len(poly_ids)!=1:
             assert len(poly_ids) == len(poly_vertices)
         len_poly = len(poly_ids)
-    
-    
-    # Frame associated with the labels grouped
-    # Override using .jpg files
-    format_ext = ".jpg"
-    frame_file_name = "".join([str(frame_file_name), format_ext])
-    frame_file = "".join([EXPORT_PATH, "/", frame_file_name])
-    print("idx, frame_file:", idx, frame_file)
-    myimg = cv2.imread(frame_file)
-    myimg_chw = myimg.transpose(2, 0, 1)/255.
-    
-    # Create polygon masks
-   
-    # Override with (272, 480)
-    format_width_scale = 480./raw_width
-    format_height_scale = 272./raw_height
-    width = int(raw_width * format_width_scale)
-    height = int(raw_height * format_height_scale) 
-    
-    
-    mask_car = np.zeros((height, width))
-    mask_rider = np.zeros((height, width))
-    mask_ped = np.zeros((height, width))
-    
-    # Creating segmentation mask
-   
-    # Iterate through bbox classes and create mask using imgaug
+
+    return frame_file_name, tags, len_box, box_ids, box_classes, box_vertices,\
+        len_poly, poly_ids, poly_classes, poly_vertices
+  
+
+def mask_bbox(mask_car, mask_rider, mask_ped, \
+              len_box, box_ids, box_classes, box_vertices):
+    """
+    Create binary [0, 1] mask image from bounding box labels.
+        mask_xxx = np.zeros((height, width))
+    """
     # if box_ids is not None:
     if box_ids != '':
         for i in range(len_box): 
@@ -125,10 +113,9 @@ for idx in random_idx:
             y1 *= format_height_scale
             
             # Draw current polygons
-            j = len_poly + i
             ImageDraw.Draw(tmp_img).polygon(
                 [x0, y0, x1, y0, x1, y1, x0, y1], 
-                outline=1, fill=1
+                outline=1, fill=1 # Choose to use value 1 for all classes
             )
     
             tmp_mask = np.array(tmp_img)
@@ -140,8 +127,15 @@ for idx in random_idx:
             elif box_color_idx_int == 3: # Ped
                 mask_ped = np.maximum(tmp_mask, mask_ped)
     
-    # !!! NOTICE: latter mask will overwrite previous ones!!! 
-    # Iterate through polygon classes and create mask using imgaug
+    return mask_car, mask_rider, mask_ped
+
+
+def mask_polygon(mask_car, mask_rider, mask_ped, \
+              len_poly, poly_ids, poly_classes, poly_vertices):
+    """
+    Create binary [0, 1] mask image from polygon labels.
+        mask_xxx = np.zeros((height, width))
+    """
     # if poly_ids is not None:
     if poly_ids != '':
         for i in range(len_poly):
@@ -167,13 +161,41 @@ for idx in random_idx:
     
             tmp_mask = np.array(tmp_img)
             # Overlay onto mask
-            if box_color_idx_int == 1: # Car
+            if poly_color_idx_int == 1: # Car
                 mask_car = np.maximum(tmp_mask, mask_car)
-            elif box_color_idx_int == 2: # Rider
+            elif poly_color_idx_int == 2: # Rider
                 mask_rider = np.maximum(tmp_mask, mask_rider)
-            elif box_color_idx_int == 3: # Ped
+            elif poly_color_idx_int == 3: # Ped
                 mask_ped = np.maximum(tmp_mask, mask_ped)
-     
+
+    return mask_car, mask_rider, mask_ped
+
+
+def gen_segmaps(cur_row, height, width):
+    """
+    Provided the CSV label record row, generate segmaps for labels. 
+    """
+    frame_file_name, tags, len_box, box_ids, box_classes, box_vertices,\
+        len_poly, poly_ids, poly_classes, poly_vertices = parse_row(cur_row)
+   
+    # Create polygon masks
+    mask_car = np.zeros((height, width))
+    mask_rider = np.zeros((height, width))
+    mask_ped = np.zeros((height, width))
+    
+    # Creating segmentation mask
+   
+    # Iterate through bbox classes and create mask using imgaug
+    mask_car, mask_rider, mask_ped = mask_bbox(mask_car, mask_rider, mask_ped, \
+              len_box, box_ids, box_classes, box_vertices)
+
+    # !!! NOTICE: latter mask will overwrite previous ones!!! 
+    # Iterate through polygon classes and create mask using imgaug
+    mask_car, mask_rider, mask_ped = mask_polygon(mask_car, mask_rider, mask_ped, \
+              len_poly, poly_ids, poly_classes, poly_vertices)
+
+    # Convert to object representing a segmentation map associated with an image.
+    #   Necessary for later augmentation.
     segmap_car = ia.SegmentationMapOnImage(np.uint8(mask_car), shape=(height, width),
                     nb_classes=1+np.int(np.max(mask_car)))
     segmap_rider = ia.SegmentationMapOnImage(np.uint8(mask_rider), shape=(height, width),
@@ -181,77 +203,63 @@ for idx in random_idx:
     segmap_ped = ia.SegmentationMapOnImage(np.uint8(mask_ped), shape=(height, width),
                     nb_classes=1+np.int(np.max(mask_ped)))
     
-    # Visualize the mask image
-    #segmap_np_array = segmap.draw()
-    #plt.imshow(segmap_np_array)
-    #plt.show()
-    
-    # Visualize mask overlayed onto origin image
-    #segmap_chw = segmap_np_array.transpose(2, 0, 1)
-    #dispimg = cv2.addWeighted(np.uint8(myimg_chw*255), 0.5, segmap_chw, 0.5, 0)
-    #plt.imshow(dispimg.transpose(1, 2, 0))
-    #plt.show()
-    
-    # Load an image (uint8) for later augmentation.
-    images.append(cv2.cvtColor(myimg, cv2.COLOR_BGR2RGB))
-    segmaps_car.append(segmap_car)
-    segmaps_rider.append(segmap_rider)
-    segmaps_ped.append(segmap_ped)
-    masks_car.append(mask_car)
-    masks_rider.append(mask_rider)
-    masks_ped.append(mask_ped)
+    return frame_file_name, segmap_car, segmap_rider, segmap_ped
 
-# Reverse the list
-images.reverse()
-segmaps_car.reverse()
-segmaps_rider.reverse()
-segmaps_ped.reverse()
-masks_car.reverse()
-masks_rider.reverse()
-masks_ped.reverse()
 
-# Augmentation
-ia.seed(1)
+EXPORT_PATH = './data/combined-jpg'
+all_rows = []
+with open('./data/dataset.csv', 'r', newline='') as csvfile:
+    csvreader = csv.reader(csvfile, delimiter=',',
+                       quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    for row in csvreader:
+        all_rows.append(row)
 
-# Define our augmentation pipeline.
-seq = iaa.Sequential([
-    # iaa.Fliplr(0.5), # 50% change horizontal flipping
-    iaa.Add((-20, 20)), # Add random values between -20 and 20 to images
-    iaa.ContrastNormalization((0.9, 1.1)), # Normalize contrast by a factor of 0.9 to 1.1
-    # RGB->HSV, random shift, then HSV->RGB
-    iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
-    iaa.WithChannels(0, iaa.Add((0, 30))),
-    iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB"),
-    # Affine
-    iaa.Affine(
-        rotate=(-10, 10),  # rotate by -10 to 10 degrees (affects heatmaps)
-        translate_px={"x": (-50, 50), "y": (-25, 25)}, # translation in pixels
-        scale={"x": (0.9, 1.1), "y": (0.9, 1.1)}, # Scaling +/-20%
-        shear=(-5, 5) # Shear by +/-5%
-    )
-], random_order=False)
 
-# Augment images and heatmaps.
-images_aug = []
-segmaps_car_aug = []
-segmaps_rider_aug = []
-segmaps_ped_aug = []
-for i in range(NUM_IMAGES_PER_ROUND):
-    seq_det = seq.to_deterministic()
-    images_aug.append(seq_det.augment_image(images[i]))
-    segmaps_car_aug.append(seq_det.augment_segmentation_maps([segmaps_car[i]])[0])
-    segmaps_rider_aug.append(seq_det.augment_segmentation_maps([segmaps_rider[i]])[0])
-    segmaps_ped_aug.append(seq_det.augment_segmentation_maps([segmaps_ped[i]])[0])
+width = 480
+height = 272
+raw_width = 1920
+raw_height = 1208
+format_width_scale = float(width)/raw_width
+format_height_scale = float(height)/raw_height
 
-mymasks = []
+# Randomly pick several images
+NUM_IMAGES_PER_ROUND = 5
+DILATION_ON = True
+DILATE_PIXELS = 2
+random_idx = randint(0, len(all_rows), NUM_IMAGES_PER_ROUND)
+
+images = []
+segmaps_car = []
+segmaps_rider = []
+segmaps_ped = []
+
 mysegmap_augs = []
 mysegmap_aug_on_images = []
-for image_aug, segmap_car_aug, segmap_rider_aug, segmap_ped_aug, mask_car, mask_rider, mask_ped \
-        in zip(images_aug, segmaps_car_aug, segmaps_rider_aug, segmaps_ped_aug, masks_car, masks_rider, masks_ped):
-    # Collect masks
-    mymasks.append(mask_car)
-    mymasks.append(mask_rider)
-    mymasks.append(mask_ped)
+
+for idx in random_idx:
+
+    frame_file_name, segmap_car, segmap_rider, segmap_ped = \
+        gen_segmaps(all_rows[idx], height, width)
+
+    # Frame associated with the labels grouped
+    # Override using .jpg files
+    format_ext = ".jpg"
+    frame_file_name = "".join([str(frame_file_name), format_ext])
+    frame_file = "".join([EXPORT_PATH, "/", frame_file_name])
+    print("idx, frame_file:", idx, frame_file)
+    myimg = cv2.imread(frame_file)
+    myimg_chw = myimg.transpose(2, 0, 1)/255.
+
+     # Load an image (uint8) for later augmentation.
+    image = cv2.cvtColor(myimg, cv2.COLOR_BGR2RGB)
+
+    seq_det = seq.to_deterministic()
+
+    # Augment images and heatmaps.
+    image_aug = seq_det.augment_image(image)
+    segmap_car_aug = seq_det.augment_segmentation_maps([segmap_car])[0]
+    segmap_rider_aug = seq_det.augment_segmentation_maps([segmap_rider])[0]
+    segmap_ped_aug = seq_det.augment_segmentation_maps([segmap_ped])[0]
 
     # Collect augmented segmaps
     tmp_segmap_aug = segmap_car_aug.draw(size=image_aug.shape[:2])
@@ -278,39 +286,17 @@ cells = []
 time_start = time.time()
 
 if DILATION_ON:
-    results  = dilate_k_pix_threads(mymasks, threads)
     results_2  = dilate_k_pix_threads(mysegmap_augs, threads)
 else:
-    results = mymasks
     results_2 = mysegmap_augs
 
 for i in range(NUM_IMAGES_PER_ROUND):
     idx = 3*i
 
-    # mask_car = mymasks[idx]
-    # mask_rider = mymasks[idx+1]
-    # mask_ped = mymasks[idx+2]
-
-    # mask_car_d = results[idx]
-    # mask_rider_d = results[idx+1]
-    # mask_ped_d = results[idx+2]
-
     segmap_car_aug_d = results_2[idx]
     segmap_rider_aug_d = results_2[idx+1]
     segmap_ped_aug_d = results_2[idx+2]
 
-    # cells.append(images[i])
-    # Concatenate and add a new dimension at tail
-    # cells.append(255 * np.stack([mask_car, mask_rider, mask_ped], axis=2)) 
-
-    # Individual dilated mask
-    # cells.append(255 * np.stack([mask_car_d, mask_rider_d, mask_ped_d], axis=2))
-    # # Augmented image
-    # cells.append(images_aug[i])
-    # # Individual dilated augmented segmap
-    # cells.append(255 * segmap_car_aug_d)
-    # cells.append(255 * segmap_rider_aug_d)
-    # cells.append(255 * segmap_ped_aug_d)
     # Augmented segmap on augmented image
     cells.append(mysegmap_aug_on_images[idx])
     cells.append(mysegmap_aug_on_images[idx+1])
