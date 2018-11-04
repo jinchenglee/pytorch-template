@@ -28,7 +28,7 @@ seq = iaa.Sequential([
     iaa.ContrastNormalization((0.9, 1.1)), # Normalize contrast by a factor of 0.9 to 1.1
     # RGB->HSV, random shift, then HSV->RGB
     iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
-    iaa.WithChannels(0, iaa.Add((0, 30))),
+    iaa.WithChannels(0, iaa.Add((0, 15))),
     iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB"),
     # Affine
     iaa.Affine(
@@ -174,6 +174,8 @@ def mask_polygon(mask_car, mask_rider, mask_ped, \
 def gen_segmaps(cur_row, height, width):
     """
     Provided the CSV label record row, generate segmaps for labels. 
+
+    Return imgaug SegmentationMapOnImage objects.
     """
     frame_file_name, tags, len_box, box_ids, box_classes, box_vertices,\
         len_poly, poly_ids, poly_classes, poly_vertices = parse_row(cur_row)
@@ -228,6 +230,8 @@ DILATION_ON = True
 DILATE_PIXELS = 2
 random_idx = randint(0, len(all_rows), NUM_IMAGES_PER_ROUND)
 
+VISUALIZATION_ON = True
+
 images = []
 segmaps_car = []
 segmaps_rider = []
@@ -236,9 +240,12 @@ segmaps_ped = []
 mysegmap_augs = []
 mysegmap_aug_on_images = []
 
+cells = []
+time_start = time.time()
+
 for idx in random_idx:
 
-    frame_file_name, segmap_car, segmap_rider, segmap_ped = \
+    frame_file_name, segmap_car_obj, segmap_rider_obj, segmap_ped_obj = \
         gen_segmaps(all_rows[idx], height, width)
 
     # Frame associated with the labels grouped
@@ -256,68 +263,63 @@ for idx in random_idx:
     seq_det = seq.to_deterministic()
 
     # Augment images and heatmaps.
+    #   Return a list of imgaug object, but only one element, thus pick xxx[0].
     image_aug = seq_det.augment_image(image)
-    segmap_car_aug = seq_det.augment_segmentation_maps([segmap_car])[0]
-    segmap_rider_aug = seq_det.augment_segmentation_maps([segmap_rider])[0]
-    segmap_ped_aug = seq_det.augment_segmentation_maps([segmap_ped])[0]
+    segmap_car_obj_aug = seq_det.augment_segmentation_maps([segmap_car_obj])[0]
+    segmap_rider_obj_aug = seq_det.augment_segmentation_maps([segmap_rider_obj])[0]
+    segmap_ped_obj_aug = seq_det.augment_segmentation_maps([segmap_ped_obj])[0]
 
     # Collect augmented segmaps
-    tmp_segmap_aug = segmap_car_aug.draw(size=image_aug.shape[:2])
-    mysegmap_augs.append(tmp_segmap_aug)
-    tmp_segmap_aug = segmap_rider_aug.draw(size=image_aug.shape[:2])
-    mysegmap_augs.append(tmp_segmap_aug)
-    tmp_segmap_aug = segmap_ped_aug.draw(size=image_aug.shape[:2])
-    mysegmap_augs.append(tmp_segmap_aug)
+    #   draw() returns an RGB Image (H,W,3) ndarray(uint8)
+    #   Only need one channel for mask generation. Reduce (H,W,3) -> (H,W) using np.any().
+    tmp_segmap_aug = segmap_car_obj_aug.draw(size=(height, width))
+    segmap_car_aug = np.any(tmp_segmap_aug, axis=2).astype(np.float)
+    tmp_segmap_aug = segmap_rider_obj_aug.draw(size=(height, width))
+    segmap_rider_aug = np.any(tmp_segmap_aug, axis=2).astype(np.float)
+    tmp_segmap_aug = segmap_ped_obj_aug.draw(size=(height, width))
+    segmap_ped_aug = np.any(tmp_segmap_aug, axis=2).astype(np.float)
 
-    # Collect augmented segmaps on augmented images
-    tmp_segmap_aug_on_image = segmap_car_aug.draw_on_image(image_aug)
-    mysegmap_aug_on_images.append(tmp_segmap_aug_on_image)
-    tmp_segmap_aug_on_image = segmap_rider_aug.draw_on_image(image_aug)
-    mysegmap_aug_on_images.append(tmp_segmap_aug_on_image)
-    tmp_segmap_aug_on_image = segmap_ped_aug.draw_on_image(image_aug)
-    mysegmap_aug_on_images.append(tmp_segmap_aug_on_image)
-
-
-# Masks only
-threads = 8
-   
-# Parallel version
-cells = []
-time_start = time.time()
-
-if DILATION_ON:
-    results_2  = dilate_k_pix_threads(mysegmap_augs, threads)
-else:
-    results_2 = mysegmap_augs
-
-for i in range(NUM_IMAGES_PER_ROUND):
-    idx = 3*i
-
-    segmap_car_aug_d = results_2[idx]
-    segmap_rider_aug_d = results_2[idx+1]
-    segmap_ped_aug_d = results_2[idx+2]
-
-    # Augmented segmap on augmented image
-    cells.append(mysegmap_aug_on_images[idx])
-    cells.append(mysegmap_aug_on_images[idx+1])
-    cells.append(mysegmap_aug_on_images[idx+2])
+    # Dilate on masks
+    if DILATION_ON:
+        segmap_car_aug_d = dilate_k_pix_ndimage(segmap_car_aug)
+        segmap_rider_aug_d = dilate_k_pix_ndimage(segmap_rider_aug)
+        segmap_ped_aug_d = dilate_k_pix_ndimage(segmap_ped_aug)
+    else:
+        segmap_car_aug_d = segmap_car_aug
+        segmap_rider_aug_d = segmap_rider_aug
+        segmap_ped_aug_d = segmap_ped_aug
 
     # Convert augmented segmap to augmented masks
-    #   segmap_xxx_aug_d is in shape (272, 480, 3), an array of True/False
-    mask_car_aug_d = np.any(segmap_car_aug_d, axis=2).astype(np.float)
-    mask_rider_aug_d = np.any(segmap_rider_aug_d, axis=2).astype(np.float)
-    mask_ped_aug_d = np.any(segmap_ped_aug_d, axis=2).astype(np.float)
-    cells.append(255 * np.stack([mask_car_aug_d, mask_rider_aug_d, mask_ped_aug_d], axis=2))
+    #   segmap_xxx_aug_d is in shape (272, 480), an array of True/False
+    mask_car_aug_d = (segmap_car_aug_d).astype(np.float)
+    mask_rider_aug_d = (segmap_rider_aug_d).astype(np.float)
+    mask_ped_aug_d = (segmap_ped_aug_d).astype(np.float)
+
+    if VISUALIZATION_ON:
+        # Collect augmented segmaps on augmented images
+        segmap_car_aug_on_image = segmap_car_obj_aug.draw_on_image(image_aug)
+        segmap_rider_aug_on_image = segmap_rider_obj_aug.draw_on_image(image_aug)
+        segmap_ped_aug_on_image = segmap_ped_obj_aug.draw_on_image(image_aug)
+
+        # Augmented segmap on augmented image
+        cells.append(segmap_car_aug_on_image)
+        cells.append(segmap_rider_aug_on_image)
+        cells.append(segmap_ped_aug_on_image)
+
+        cells.append(255 * np.stack([mask_car_aug_d, mask_rider_aug_d, mask_ped_aug_d], axis=2))
 
 
-time_end = time.time()
-print("time spent (parallel threads version):", time_end - time_start)
 
-# Convert cells to grid image and save.
-grid_image = ia.draw_grid(cells, cols=int(len(cells)/NUM_IMAGES_PER_ROUND))
-plt.imshow(grid_image)
-# figM = plt.get_current_fig_manager()
-# figM.resize(*figM.window.maxsize())
-plt.show()
+if VISUALIZATION_ON:
 
-imageio.imwrite("example_segmaps.jpg", grid_image)
+    time_end = time.time()
+    print("Time spent:", time_end - time_start)
+
+    # Convert cells to grid image and save.
+    grid_image = ia.draw_grid(cells, cols=int(len(cells)/NUM_IMAGES_PER_ROUND))
+    plt.imshow(grid_image)
+    figM = plt.get_current_fig_manager()
+    figM.resize(*figM.window.maxsize())
+    plt.show()
+
+    imageio.imwrite("example_segmaps.jpg", grid_image)
