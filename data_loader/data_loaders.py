@@ -35,7 +35,8 @@ class MnistDataLoader(BaseDataLoader):
         super(MnistDataLoader, self).__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)
 
 class MyDataset(Dataset):
-    """Dataset wrapping images and target labels for data.
+    """
+    Dataset wrapping images and target labels for data.
 
     Arguments:
         A CSV file path
