@@ -3,8 +3,8 @@ import numpy as np
 import cv2
 import ast
 
-from dilate import *
-from lut import colorlut 
+from augmentation.dilate import *
+from misc.lut import colorlut 
 
 from PIL import Image, ImageDraw
 import imgaug as ia

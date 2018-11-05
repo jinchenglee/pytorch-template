@@ -9,8 +9,8 @@ from multiprocessing import Pool as ProcessPool # This is real multi-process/mul
 
 import time
 
-from dilate import *
-from lut import colorlut 
+from augmentation.dilate import *
+from misc.lut import colorlut 
 from augmentation.aug import MyAugmentor
 
 import imgaug as ia
