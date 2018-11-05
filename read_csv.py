@@ -4,6 +4,9 @@ from numpy.random import randint
 import matplotlib.pyplot as plt
 import csv
 
+#from  multiprocessing.dummy import Pool as ThreadPool # THIS IS NOT RIGHT, single process multi-thread, not friendly to Python
+from multiprocessing import Pool as ProcessPool # This is real multi-process/multi-thread.
+
 import time
 
 from dilate import *
@@ -33,27 +36,33 @@ VISUALIZATION_ON = True
 NUM_IMAGES_PER_ROUND = 5
 random_idx = randint(0, len(all_rows), NUM_IMAGES_PER_ROUND)
 
+threads = 6
 
 print("Visualization:", str(VISUALIZATION_ON))
 
 cells = []
 time_start = time.time()
 
-for idx in random_idx:
+myaug = MyAugmentor()
 
-    myaug = MyAugmentor()
-
-    image, masks_aug_d = myaug.exec_augment(all_rows[idx])
-
-    if VISUALIZATION_ON:
+if VISUALIZATION_ON:
+    for idx in random_idx:
+        # Sequential execution
+        image, masks_aug_d = myaug.exec_augment(all_rows[idx])
 
         image_aug, segmaps_aug_on_image = myaug.visualize()
-            
         # Augmented segmap on augmented image
         for i in range(segmaps_aug_on_image.shape[0]):
             cells.append(segmaps_aug_on_image[i])
 
         cells.append(255 * masks_aug_d.transpose((1, 2, 0)))
+else: 
+    rows = [all_rows[idx] for idx in random_idx]
+    # Parallel execution
+    pool = ProcessPool(threads)
+    results = pool.map(myaug.exec_augment, rows)
+    pool.close()
+    pool.join()
 
 time_end = time.time()
 print("Visualization... Time spent:", time_end - time_start)
