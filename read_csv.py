@@ -43,20 +43,17 @@ for idx in random_idx:
 
     myaug = MyAugmentor()
 
-    image, mask_car_aug_d, mask_rider_aug_d, mask_ped_aug_d = myaug.exec_augment(all_rows[idx])
+    image, masks_aug_d = myaug.exec_augment(all_rows[idx])
 
     if VISUALIZATION_ON:
 
-        image_aug, segmap_car_aug_on_image, \
-            segmap_rider_aug_on_image, segmap_ped_aug_on_image = \
-                myaug.visualize()
+        image_aug, segmaps_aug_on_image = myaug.visualize()
             
         # Augmented segmap on augmented image
-        cells.append(segmap_car_aug_on_image)
-        cells.append(segmap_rider_aug_on_image)
-        cells.append(segmap_ped_aug_on_image)
+        for i in range(segmaps_aug_on_image.shape[0]):
+            cells.append(segmaps_aug_on_image[i])
 
-        cells.append(255 * np.stack([mask_car_aug_d, mask_rider_aug_d, mask_ped_aug_d], axis=2))
+        cells.append(255 * masks_aug_d.transpose((1, 2, 0)))
 
 time_end = time.time()
 print("Visualization... Time spent:", time_end - time_start)

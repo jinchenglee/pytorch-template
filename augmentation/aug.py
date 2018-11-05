@@ -31,6 +31,8 @@ class MyAugmentor():
         self.format_width_scale = float(self.width)/raw_width
         self.format_height_scale = float(self.height)/raw_height
 
+        self.num_classes = 3
+
         # Augmentation
         ia.seed(1)
 
@@ -99,7 +101,7 @@ class MyAugmentor():
             len_poly, poly_ids, poly_classes, poly_vertices
     
 
-    def _mask_bbox(self, mask_car, mask_rider, mask_ped, \
+    def _mask_bbox(self, masks, \
                   len_box, box_ids, box_classes, box_vertices):
         """
         Create binary [0, 1] mask image from bounding box labels.
@@ -133,17 +135,12 @@ class MyAugmentor():
 
                 tmp_mask = np.array(tmp_img)
                 # Overlay onto mask
-                if box_color_idx_int == 1: # Car
-                    mask_car = np.maximum(tmp_mask, mask_car)
-                elif box_color_idx_int == 2: # Rider
-                    mask_rider = np.maximum(tmp_mask, mask_rider)
-                elif box_color_idx_int == 3: # Ped
-                    mask_ped = np.maximum(tmp_mask, mask_ped)
+                masks[box_color_idx_int-1] = np.maximum(tmp_mask, masks[box_color_idx_int-1])
 
-        return mask_car, mask_rider, mask_ped
+        return masks
 
 
-    def _mask_polygon(self, mask_car, mask_rider, mask_ped, \
+    def _mask_polygon(self, masks, \
                   len_poly, poly_ids, poly_classes, poly_vertices):
         """
         Create binary [0, 1] mask image from polygon labels.
@@ -174,14 +171,9 @@ class MyAugmentor():
 
                 tmp_mask = np.array(tmp_img)
                 # Overlay onto mask
-                if poly_color_idx_int == 1: # Car
-                    mask_car = np.maximum(tmp_mask, mask_car)
-                elif poly_color_idx_int == 2: # Rider
-                    mask_rider = np.maximum(tmp_mask, mask_rider)
-                elif poly_color_idx_int == 3: # Ped
-                    mask_ped = np.maximum(tmp_mask, mask_ped)
+                masks[poly_color_idx_int-1] = np.maximum(tmp_mask, masks[poly_color_idx_int-1])
 
-        return mask_car, mask_rider, mask_ped
+        return masks
 
 
     def _gen_segmaps(self, cur_row):
@@ -194,38 +186,39 @@ class MyAugmentor():
             len_poly, poly_ids, poly_classes, poly_vertices = self._parse_row(cur_row)
     
         # Create polygon masks
-        mask_car = np.zeros((self.height, self.width))
-        mask_rider = np.zeros((self.height, self.width))
-        mask_ped = np.zeros((self.height, self.width))
+        masks = np.zeros((self.num_classes, self.height, self.width))
 
         # Creating segmentation mask
     
         # Iterate through bbox classes and create mask using imgaug
-        mask_car, mask_rider, mask_ped = self._mask_bbox(mask_car, mask_rider, mask_ped, \
+        masks = self._mask_bbox(masks, \
                   len_box, box_ids, box_classes, box_vertices)
 
         # !!! NOTICE: latter mask will overwrite previous ones!!! 
         # Iterate through polygon classes and create mask using imgaug
-        mask_car, mask_rider, mask_ped = self._mask_polygon(mask_car, mask_rider, mask_ped, \
+        masks = self._mask_polygon(masks, \
                   len_poly, poly_ids, poly_classes, poly_vertices)
 
         # Convert to object representing a segmentation map associated with an image.
         #   Necessary for later augmentation.
-        segmap_car = ia.SegmentationMapOnImage(np.uint8(mask_car), shape=(self.height, self.width),
-                        nb_classes=1+np.int(np.max(mask_car)))
-        segmap_rider = ia.SegmentationMapOnImage(np.uint8(mask_rider), shape=(self.height, self.width),
-                        nb_classes=1+np.int(np.max(mask_rider)))
-        segmap_ped = ia.SegmentationMapOnImage(np.uint8(mask_ped), shape=(self.height, self.width),
-                        nb_classes=1+np.int(np.max(mask_ped)))
+        segmap_objs = []
+        for i in range(self.num_classes):
+            segmap_obj = ia.SegmentationMapOnImage(np.uint8(masks[i]), shape=(self.height, self.width),
+                        nb_classes=1+np.int(np.max(masks[i])))
+            segmap_objs.append(segmap_obj)
 
-        return frame_file_name, segmap_car, segmap_rider, segmap_ped
+        segmap_objs = np.array(segmap_objs)
+
+        return frame_file_name, segmap_objs
 
 
     def exec_augment(self, cur_row):
         """
         Execute augmentation.
+
+        Return shapes image(H, W, C), masks_aug_d(NumClasses, H, W)
         """
-        frame_file_name, segmap_car_obj, segmap_rider_obj, segmap_ped_obj = \
+        frame_file_name, segmap_objs = \
             self._gen_segmaps(cur_row)
 
         # Frame associated with the labels grouped
@@ -233,7 +226,7 @@ class MyAugmentor():
         frame_file = "".join([self.export_path, "/", frame_file_name])
         print("frame_file:", frame_file)
 
-         # Load an image (uint8) for later augmentation.
+         # Load an image (uint8) for later augmentation
         self.image = cv2.imread(frame_file)
 
         # Augmentor
@@ -241,42 +234,43 @@ class MyAugmentor():
 
         # Augment images and heatmaps.
         #   Return a list of imgaug object, but only one element, thus pick xxx[0].
-        self.segmap_car_obj_aug = self.seq_det.augment_segmentation_maps([segmap_car_obj])[0]
-        self.segmap_rider_obj_aug = self.seq_det.augment_segmentation_maps([segmap_rider_obj])[0]
-        self.segmap_ped_obj_aug = self.seq_det.augment_segmentation_maps([segmap_ped_obj])[0]
+        self.segmap_objs_aug = []
+        for i in range(self.num_classes):
+            self.segmap_objs_aug.append(self.seq_det.augment_segmentation_maps([segmap_objs[i]])[0])
 
         # Collect augmented segmaps
         #   draw() returns an RGB Image (H,W,3) ndarray(uint8)
         #   Only need one channel for mask generation. Reduce (H,W,3) -> (H,W) using np.any().
-        tmp_segmap_aug = self.segmap_car_obj_aug.draw(size=(self.height, self.width))
-        segmap_car_aug = np.any(tmp_segmap_aug, axis=2).astype(np.float)
-        tmp_segmap_aug = self.segmap_rider_obj_aug.draw(size=(self.height, self.width))
-        segmap_rider_aug = np.any(tmp_segmap_aug, axis=2).astype(np.float)
-        tmp_segmap_aug = self.segmap_ped_obj_aug.draw(size=(self.height, self.width))
-        segmap_ped_aug = np.any(tmp_segmap_aug, axis=2).astype(np.float)
+        segmaps_aug = []
+        for i in range(self.num_classes):
+            tmp_segmap_aug = self.segmap_objs_aug[i].draw(size=(self.height, self.width))
+            segmaps_aug.append(np.any(tmp_segmap_aug, axis=2).astype(np.float))
 
         # Dilate on masks
-        if self.dilation:
-            segmap_car_aug_d = dilate_k_pix_ndimage(segmap_car_aug)
-            segmap_rider_aug_d = dilate_k_pix_ndimage(segmap_rider_aug)
-            segmap_ped_aug_d = dilate_k_pix_ndimage(segmap_ped_aug)
-        else:
-            segmap_car_aug_d = segmap_car_aug
-            segmap_rider_aug_d = segmap_rider_aug
-            segmap_ped_aug_d = segmap_ped_aug
+        segmaps_aug_d = []
+        for i in range(self.num_classes):
+            if self.dilation:
+                segmaps_aug_d.append(dilate_k_pix_ndimage(segmaps_aug[i]))
+            else:
+                segmaps_aug_d.append(segmaps_aug[i])
 
         # Convert augmented segmap to augmented masks
         #   segmap_xxx_aug_d is in shape (272, 480), an array of True/False
-        mask_car_aug_d = (segmap_car_aug_d).astype(np.float)
-        mask_rider_aug_d = (segmap_rider_aug_d).astype(np.float)
-        mask_ped_aug_d = (segmap_ped_aug_d).astype(np.float)
+        masks_aug_d = []
+        for i in range(self.num_classes):
+            masks_aug_d.append((segmaps_aug_d[i]).astype(np.float))
 
-        return self.image, mask_car_aug_d, mask_rider_aug_d, mask_ped_aug_d
+        masks_aug_d = np.array(masks_aug_d)
+
+        # Return shapes (H, W, C), (NumClasses, H, W)
+        return self.image/255., masks_aug_d
 
 
     def visualize(self):
         """
         Visualize the augmented image and masks.
+
+        Return shapes image_aug(H, W, C), segmaps_aug_on_image(NumClasses, H, W, C)
         """
         # Pyplot needs color space conversion
         img = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
@@ -285,9 +279,11 @@ class MyAugmentor():
         image_aug = self.seq_det.augment_image(img)
 
         # Collect augmented segmaps on augmented images
-        segmap_car_aug_on_image = self.segmap_car_obj_aug.draw_on_image(image_aug)
-        segmap_rider_aug_on_image = self.segmap_rider_obj_aug.draw_on_image(image_aug)
-        segmap_ped_aug_on_image = self.segmap_ped_obj_aug.draw_on_image(image_aug)
+        segmaps_aug_on_image = []
+        for i in range(self.num_classes):
+            segmaps_aug_on_image.append(self.segmap_objs_aug[i].draw_on_image(image_aug))
 
-        return image_aug, segmap_car_aug_on_image, \
-               segmap_rider_aug_on_image, segmap_ped_aug_on_image
+        segmaps_aug_on_image = np.array(segmaps_aug_on_image)
+
+        # Return shapes (H, W, C), (NumClasses, H, W, C)
+        return image_aug, segmaps_aug_on_image
