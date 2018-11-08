@@ -52,6 +52,9 @@ class MyDataset(Dataset):
                 "Some images referenced in the CSV file were not found"
         
         # TODO: How to load target from CVS with 3 classes instead of 4?
+        #       Maybe just dropping the 2nd column. 
+        #   The 4 classes are ordered as ['car', 'none', 'ped', 'rider'] alphabetically.
+        #   E.g. 'car rider' will be translated into [1., 0., 0., 1.]
         self.mlb = MultiLabelBinarizer()
         self.img_path = img_path
         self.img_ext = img_ext

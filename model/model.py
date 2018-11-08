@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
@@ -39,4 +40,4 @@ class MyModel(BaseModel):
         x = self.features(x)
         x = x.view(x.size(0), -1)
         x = self.classifier(x)
-        return F.sigmoid(x)
+        return torch.sigmoid(x)
