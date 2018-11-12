@@ -80,7 +80,7 @@ class MyDataLoader(BaseDataLoader):
     """
     Data loading using BaseDataLoader.
     """
-    def __init__(self, data_dir, batch_size, shuffle, validation_split, num_workers, training=True):
+    def __init__(self, data_dir, train_csv_file, test_csv_file, batch_size, shuffle, validation_split, num_workers, training=True):
         trsfm = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
@@ -89,9 +89,9 @@ class MyDataLoader(BaseDataLoader):
         # TODO: make these configurable from .json config file
         IMG_PATH = data_dir + 'combined-jpg/'
         IMG_EXT = '.jpg'
-        TRAIN_DATA = data_dir + 'train_v4.csv'
+        TRAIN_DATA = data_dir + train_csv_file
         # TODO: how to lead test dataset?
-        TEST_DATA = data_dir + 'test_v4.csv'
+        TEST_DATA = data_dir + test_csv_file 
 
         self.dataset = MyDataset(TRAIN_DATA, IMG_PATH, IMG_EXT, trsfm)
         super(MyDataLoader, self).__init__(self.dataset, batch_size, shuffle, validation_split, num_workers)

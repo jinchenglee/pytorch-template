@@ -1,4 +1,5 @@
 import numpy as np
+import time
 import torch
 from torchvision.utils import make_grid
 from base import BaseTrainer
@@ -47,12 +48,14 @@ class Trainer(BaseTrainer):
 
             The metrics in log must have the key 'metrics'.
         """
+        time_start = time.time()
+
         self.model.train()
     
         total_loss = 0
         total_metrics = np.zeros(len(self.metrics))
         for batch_idx, (data, target) in enumerate(self.data_loader):
-            data, target = data.to(self.device), target.to(self.device)
+            data, target = data.to(self.device, non_blocking=True), target.to(self.device, non_blocking=True)
 
             self.optimizer.zero_grad()
             output = self.model(data)
@@ -60,10 +63,11 @@ class Trainer(BaseTrainer):
             loss.backward()
             self.optimizer.step()
 
-            self.writer.set_step((epoch - 1) * len(self.data_loader) + batch_idx)
-            self.writer.add_scalar('loss', loss.item())
-            total_loss += loss.item()
-            total_metrics += self._eval_metrics(output, target)
+            # self.writer.set_step((epoch - 1) * len(self.data_loader) + batch_idx)
+            # self.writer.add_scalar('loss', loss.item())
+            # # TODO: do loss calculation on GPU? And piece-wise? To reduce traffic between GPUs.
+            # total_loss += loss.item()
+            # total_metrics += self._eval_metrics(output, target)
 
             if self.verbosity >= 2 and batch_idx % self.log_step == 0:
                 self.logger.info('Train Epoch: {} [{}/{} ({:.0f}%)] Loss: {:.6f}'.format(
@@ -85,6 +89,9 @@ class Trainer(BaseTrainer):
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
+
+        time_end = time.time()
+        print("\n_train_epoch() time spent:", time_end - time_start, "s")
 
         return log
 
@@ -111,7 +118,10 @@ class Trainer(BaseTrainer):
                 self.writer.add_scalar('loss', loss.item())
                 total_val_loss += loss.item()
                 total_val_metrics += self._eval_metrics(output, target)
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+
+                # Less freq. image dumpping for faster validation
+                if batch_idx % self.log_step == 0:
+                    self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
 
         return {
             'val_loss': total_val_loss / len(self.valid_data_loader),

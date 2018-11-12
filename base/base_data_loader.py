@@ -23,7 +23,7 @@ class BaseDataLoader(DataLoader):
             'shuffle': self.shuffle,
             'collate_fn': collate_fn,
             'num_workers': num_workers,
-            'pin_memory' : True
+            'pin_memory' : True # Use pinned memory buffer on host for faster data transfer to device
             }
         super(BaseDataLoader, self).__init__(sampler=self.sampler, **self.init_kwargs)
 

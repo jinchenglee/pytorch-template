@@ -1,6 +1,6 @@
 {
     "name": "MyNet",
-    "n_gpu": 2,
+    "n_gpu": 3,
     
     "arch": {
         "type": "MyModel",
@@ -10,10 +10,12 @@
         "type": "MyDataLoader",
         "args":{
             "data_dir": "data/",
-            "batch_size": 64,
+            "train_csv_file": "train_overfit.csv",
+            "test_csv_file": "test_v4.csv",
+            "batch_size": 72,
             "shuffle": true,
             "validation_split": 0.1,
-            "num_workers": 8
+            "num_workers": 6
         }
     },
     "optimizer": {
@@ -36,10 +38,10 @@
         }
     },
     "trainer": {
-        "epochs": 10,
+        "epochs": 2,
         "save_dir": "saved/",
         "save_freq": 1,
-        "verbosity": 2,
+        "verbosity": 1,
         "monitor": "val_loss",
         "monitor_mode": "min"
     },
