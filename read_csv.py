@@ -48,7 +48,7 @@ myaug = MyAugmentor()
 if VISUALIZATION_ON:
     for idx in random_idx:
         # Sequential execution
-        image, masks_aug_d = myaug.exec_augment(all_rows[idx])
+        image, masks_aug_d, _ = myaug.exec_augment(all_rows[idx])
 
         image_aug, segmaps_aug_on_image = myaug.visualize()
         # Augmented segmap on augmented image

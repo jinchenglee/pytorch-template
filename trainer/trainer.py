@@ -13,7 +13,7 @@ class Trainer(BaseTrainer):
         Inherited from BaseTrainer.
     """
     def __init__(self, model, loss, metrics, optimizer, resume, config,
-                 data_loader, valid_data_loader=None, lr_scheduler=None, train_logger=None):
+                 data_loader, num_classes=3, valid_data_loader=None, lr_scheduler=None, train_logger=None):
         super(Trainer, self).__init__(model, loss, metrics, optimizer, resume, config, train_logger)
         self.config = config
         self.batch_size = data_loader.batch_size
@@ -22,14 +22,16 @@ class Trainer(BaseTrainer):
         self.do_validation = self.valid_data_loader is not None
         self.lr_scheduler = lr_scheduler
         self.log_step = int(np.sqrt(self.batch_size))
+        self.num_classes = num_classes
 
     def _eval_metrics(self, output, target):
-        acc_metrics = np.zeros(len(self.metrics))
+        acc_metrics = np.zeros((len(self.metrics), self.num_classes))
         for i, metric in enumerate(self.metrics):
             acc_metrics[i] += metric(output, target)
-            # Python3.6 usage of f-string?
-            #self.writer.add_scalar(f'{metric.__name__}', acc_metrics[i])
-            self.writer.add_scalar('metric.__name__', acc_metrics[i])
+            self.writer.add_scalar(metric.__name__+'_car', acc_metrics[i][0])
+            self.writer.add_scalar(metric.__name__+'_none', acc_metrics[i][1])
+            self.writer.add_scalar(metric.__name__+'_ped', acc_metrics[i][2])
+            self.writer.add_scalar(metric.__name__+'_rider', acc_metrics[i][3])
         return acc_metrics
 
     def _train_epoch(self, epoch):
@@ -53,7 +55,7 @@ class Trainer(BaseTrainer):
         self.model.train()
     
         total_loss = 0
-        total_metrics = np.zeros(len(self.metrics))
+        total_metrics = np.zeros((len(self.metrics), self.num_classes))
         for batch_idx, (data, target) in enumerate(self.data_loader):
             data, target = data.to(self.device, non_blocking=True), target.to(self.device, non_blocking=True)
 
@@ -63,11 +65,12 @@ class Trainer(BaseTrainer):
             loss.backward()
             self.optimizer.step()
 
-            # self.writer.set_step((epoch - 1) * len(self.data_loader) + batch_idx)
-            # self.writer.add_scalar('loss', loss.item())
-            # # TODO: do loss calculation on GPU? And piece-wise? To reduce traffic between GPUs.
-            # total_loss += loss.item()
-            # total_metrics += self._eval_metrics(output, target)
+            self.writer.set_step((epoch - 1) * len(self.data_loader) + batch_idx)
+            self.writer.add_scalar('loss', loss.item())
+            # TODO: do loss calculation on GPU? And piece-wise? To reduce traffic between GPUs.
+            total_loss += loss.item()
+            # print("_train: target=", target, ", output=", output, ", total_loss=", total_loss)
+            total_metrics += self._eval_metrics(output, target)
 
             if self.verbosity >= 2 and batch_idx % self.log_step == 0:
                 self.logger.info('Train Epoch: {} [{}/{} ({:.0f}%)] Loss: {:.6f}'.format(
@@ -106,7 +109,7 @@ class Trainer(BaseTrainer):
         """
         self.model.eval()
         total_val_loss = 0
-        total_val_metrics = np.zeros(len(self.metrics))
+        total_val_metrics = np.zeros((len(self.metrics), self.num_classes))
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(self.valid_data_loader):
                 data, target = data.to(self.device), target.to(self.device)
@@ -117,6 +120,7 @@ class Trainer(BaseTrainer):
                 self.writer.set_step((epoch - 1) * len(self.valid_data_loader) + batch_idx, 'valid')
                 self.writer.add_scalar('loss', loss.item())
                 total_val_loss += loss.item()
+                # print("_val: target=", target, ", output=", output, ", total_loss=", total_val_loss)
                 total_val_metrics += self._eval_metrics(output, target)
 
                 # Less freq. image dumpping for faster validation

@@ -28,8 +28,6 @@ class BaseDataLoader(DataLoader):
         super(BaseDataLoader, self).__init__(sampler=self.sampler, **self.init_kwargs)
 
     def _split_sampler(self, split):
-        if split == 0.0:
-            return None, None
 
         idx_full = np.arange(self.n_samples)
 
@@ -48,7 +46,10 @@ class BaseDataLoader(DataLoader):
         self.shuffle = False
         self.n_samples = len(train_idx)
 
-        return train_sampler, valid_sampler
+        if split == 0.0: # Used for overfit testing
+            return train_sampler, train_sampler
+        else:
+            return train_sampler, valid_sampler
         
     def split_validation(self):
         if self.valid_sampler is None:

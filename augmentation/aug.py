@@ -16,7 +16,7 @@ class MyAugmentor():
     Data augmentation while data loading. Use imgaug library.
     """
 
-    def __init__(self, width=480, height=272, dilation=True, dilate_k_pixels=2):
+    def __init__(self, width=480, height=272, dilation=True, dilate_k_pixels=2, training=False):
 
         self.dilation = dilation
         self.dilate_k_pixels = dilate_k_pixels
@@ -33,26 +33,32 @@ class MyAugmentor():
 
         self.num_classes = 3
 
+        self.training = training
+
         # Augmentation
         ia.seed(1)
 
         # Define our augmentation pipeline.
-        self.seq = iaa.Sequential([
-            # iaa.Fliplr(0.5), # 50% change horizontal flipping
-            iaa.Add((-20, 20)), # Add random values between -20 and 20 to images
-            iaa.ContrastNormalization((0.9, 1.1)), # Normalize contrast by a factor of 0.9 to 1.1
-            # RGB->HSV, random shift, then HSV->RGB
-            iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
-            iaa.WithChannels(0, iaa.Add((0, 15))),
-            iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB"),
-            # Affine
-            iaa.Affine(
-                rotate=(-10, 10),  # rotate by -10 to 10 degrees (affects heatmaps)
-                translate_px={"x": (-50, 50), "y": (-25, 25)}, # translation in pixels
-                scale={"x": (0.9, 1.1), "y": (0.9, 1.1)}, # Scaling +/-20%
-                shear=(-5, 5) # Shear by +/-5%
-            )
-        ], random_order=False)
+        if self.training:
+            self.seq = iaa.Sequential([
+                # iaa.Fliplr(0.5), # 50% change horizontal flipping
+                iaa.Add((-20, 20)), # Add random values between -20 and 20 to images
+                iaa.ContrastNormalization((0.9, 1.1)), # Normalize contrast by a factor of 0.9 to 1.1
+                # RGB->HSV, random shift, then HSV->RGB
+                iaa.ChangeColorspace(from_colorspace="RGB", to_colorspace="HSV"),
+                iaa.WithChannels(0, iaa.Add((0, 15))),
+                iaa.ChangeColorspace(from_colorspace="HSV", to_colorspace="RGB"),
+                # Affine
+                iaa.Affine(
+                    rotate=(-10, 10),  # rotate by -10 to 10 degrees (affects heatmaps)
+                    translate_px={"x": (-50, 50), "y": (-25, 25)}, # translation in pixels
+                    scale={"x": (0.9, 1.1), "y": (0.9, 1.1)}, # Scaling +/-20%
+                    shear=(-5, 5) # Shear by +/-5%
+                )
+            ], random_order=False)
+        else:
+            # Null version for non-training pass
+            self.seq = iaa.Sequential([])
 
 
 
@@ -72,7 +78,7 @@ class MyAugmentor():
         len_poly = 0
 
         # if box_ids is not None:
-        if box_ids != '':
+        if box_ids != 'none':
             box_ids = (box_ids).split(',')
             box_classes = (box_classes).split(',')
             #box_attrs = (box_attrs).split(',')
@@ -85,7 +91,7 @@ class MyAugmentor():
             len_box = len(box_ids)
 
         # if poly_ids is not None:
-        if poly_ids != '':
+        if poly_ids != 'none':
             poly_ids = (poly_ids).split(',')
             poly_classes = (poly_classes).split(',')
             #poly_attrs = (poly_attrs).split(',')
@@ -108,12 +114,12 @@ class MyAugmentor():
             mask_xxx = np.zeros((height, width))
         """
         # if box_ids is not None:
-        if box_ids != '':
+        if box_ids != 'none':
             for i in range(len_box): 
                 # class mapped color/index
                 box_color_idx_int = colorlut[box_classes[i]]
                 if box_color_idx_int == 0 or box_color_idx_int > 3:
-                    print("Wired class in BBOX:", box_classes[i])
+                    # print("Wired class in BBOX:", box_classes[i])
                     continue
 
                 # Empty message to start with
@@ -147,12 +153,12 @@ class MyAugmentor():
             mask_xxx = np.zeros((height, width))
         """
         # if poly_ids is not None:
-        if poly_ids != '':
+        if poly_ids != 'none':
             for i in range(len_poly):
                 # class mapped color/index
                 poly_color_idx_int = colorlut[poly_classes[i]]
                 if poly_color_idx_int == 0 or poly_color_idx_int > 3:
-                    print("Wired class in POLYGON:", poly_classes[i])
+                    # print("Wired class in POLYGON:", poly_classes[i])
                     continue
 
                 # Empty message to start with
@@ -209,22 +215,22 @@ class MyAugmentor():
 
         segmap_objs = np.array(segmap_objs)
 
-        return frame_file_name, segmap_objs
+        return frame_file_name, segmap_objs, tags
 
 
-    def exec_augment(self, cur_row):
+    def exec_augment(self, cur_row, mode='classification'):
         """
         Execute augmentation.
 
         Return shapes image(H, W, C), masks_aug_d(NumClasses, H, W)
         """
-        frame_file_name, segmap_objs = \
+        frame_file_name, segmap_objs, tags = \
             self._gen_segmaps(cur_row)
 
         # Frame associated with the labels grouped
         frame_file_name = "".join([str(frame_file_name), self.format_ext])
         frame_file = "".join([self.export_path, "/", frame_file_name])
-        print("frame_file:", frame_file)
+        # print("frame_file:", frame_file)
 
          # Load an image (uint8) for later augmentation
         self.image = cv2.imread(frame_file)
@@ -232,38 +238,42 @@ class MyAugmentor():
         # Augmentor
         self.seq_det = self.seq.to_deterministic()
 
-        # Augment images and heatmaps.
-        #   Return a list of imgaug object, but only one element, thus pick xxx[0].
+        # Augment images
+        image_aug = self.seq_det.augment_image(self.image)
+
+        # Augment masks.
         self.segmap_objs_aug = []
-        for i in range(self.num_classes):
-            self.segmap_objs_aug.append(self.seq_det.augment_segmentation_maps([segmap_objs[i]])[0])
-
-        # Collect augmented segmaps
-        #   draw() returns an RGB Image (H,W,3) ndarray(uint8)
-        #   Only need one channel for mask generation. Reduce (H,W,3) -> (H,W) using np.any().
         segmaps_aug = []
-        for i in range(self.num_classes):
-            tmp_segmap_aug = self.segmap_objs_aug[i].draw(size=(self.height, self.width))
-            segmaps_aug.append(np.any(tmp_segmap_aug, axis=2).astype(np.float))
-
-        # Dilate on masks
         segmaps_aug_d = []
-        for i in range(self.num_classes):
-            if self.dilation:
-                segmaps_aug_d.append(dilate_k_pix_ndimage(segmaps_aug[i]))
-            else:
-                segmaps_aug_d.append(segmaps_aug[i])
-
-        # Convert augmented segmap to augmented masks
-        #   segmap_xxx_aug_d is in shape (272, 480), an array of True/False
         masks_aug_d = []
-        for i in range(self.num_classes):
-            masks_aug_d.append((segmaps_aug_d[i]).astype(np.float))
+        if mode != 'classification':
+            #   Return a list of imgaug object, but only one element, thus pick xxx[0].
+            for i in range(self.num_classes):
+                self.segmap_objs_aug.append(self.seq_det.augment_segmentation_maps([segmap_objs[i]])[0])
 
-        masks_aug_d = np.array(masks_aug_d)
+            # Collect augmented segmaps
+            #   draw() returns an RGB Image (H,W,3) ndarray(uint8)
+            #   Only need one channel for mask generation. Reduce (H,W,3) -> (H,W) using np.any().
+            for i in range(self.num_classes):
+                tmp_segmap_aug = self.segmap_objs_aug[i].draw(size=(self.height, self.width))
+                segmaps_aug.append(np.any(tmp_segmap_aug, axis=2).astype(np.float))
+
+            # Dilate on masks
+            for i in range(self.num_classes):
+                if self.dilation:
+                    segmaps_aug_d.append(dilate_k_pix_ndimage(segmaps_aug[i]))
+                else:
+                    segmaps_aug_d.append(segmaps_aug[i])
+
+            # Convert augmented segmap to augmented masks
+            #   segmap_xxx_aug_d is in shape (272, 480), an array of True/False
+            for i in range(self.num_classes):
+                masks_aug_d.append((segmaps_aug_d[i]).astype(np.float))
+
+            masks_aug_d = np.array(masks_aug_d)
 
         # Return shapes (H, W, C), (NumClasses, H, W)
-        return self.image/255., masks_aug_d
+        return image_aug/255., masks_aug_d, tags
 
 
     def visualize(self):

@@ -33,7 +33,7 @@ class MyModel(BaseModel):
         # Remove the last two layers (fc and activation)
         self.classifier = nn.Sequential(
             # TODO: How to load target from CVS with 3 classes instead of 4?
-            nn.Linear(61440, 4)
+            nn.Linear(61440, num_classes)
         )
 
     def forward(self, x):

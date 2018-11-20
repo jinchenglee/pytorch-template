@@ -6,6 +6,7 @@ import data_loader.data_loaders as module_data
 import model.loss as module_loss
 import model.metric as module_metric
 import model.model as module_arch
+import numpy as np
 
 def get_instance(module, name, config, *args):
     return getattr(module, config[name]['type'])(*args, **config[name]['args'])
@@ -14,11 +15,13 @@ def main(config, resume):
     # setup data_loader instances
     data_loader = getattr(module_data, config['data_loader']['type'])(
         config['data_loader']['args']['data_dir'],
-        batch_size=512,
+        config['data_loader']['args']['train_csv_file'],
+        config['data_loader']['args']['test_csv_file'],
+        config['data_loader']['args']['batch_size'],
         shuffle=False,
         validation_split=0.0,
         training=False,
-        num_workers=2
+        num_workers=6
     )
 
     # build model architecture
@@ -28,6 +31,7 @@ def main(config, resume):
     # get function handles of loss and metrics
     loss_fn = getattr(module_loss, config['loss'])
     metric_fns = [getattr(module_metric, met) for met in config['metrics']]
+    num_classes = config['arch']['args']['num_classes']
 
     # load state dict
     checkpoint = torch.load(resume)
@@ -42,7 +46,7 @@ def main(config, resume):
     model.eval()
 
     total_loss = 0.0
-    total_metrics = torch.zeros(len(metric_fns))
+    total_metrics = np.zeros((len(metric_fns), num_classes))
 
     with torch.no_grad():
         for i, (data, target) in enumerate(tqdm(data_loader)):
@@ -61,7 +65,7 @@ def main(config, resume):
 
     n_samples = len(data_loader.sampler)
     log = {'loss': total_loss / n_samples}
-    log.update({met.__name__ : total_metrics[i].item() / n_samples for i, met in enumerate(metric_fns)})
+    log.update({met.__name__ : (total_metrics[i] / n_samples).tolist() for i, met in enumerate(metric_fns)})
     print(log)
 
 

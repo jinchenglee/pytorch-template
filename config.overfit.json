@@ -12,12 +12,12 @@
         "type": "MyDataLoader",
         "args":{
             "data_dir": "data/",
-            "train_csv_file": "train_v5_overfit.csv",
-            "test_csv_file": "test_v5.csv",
-            "batch_size": 60,
+            "train_csv_file": "train_overfit.csv",
+            "test_csv_file": "train_overfit.csv",
+            "batch_size": 7,
             "shuffle": true,
-            "validation_split": 0.1,
-            "num_workers": 8,
+            "validation_split": 0.0,
+            "num_workers": 6,
             "training" : true
         }
     },
@@ -41,10 +41,10 @@
         }
     },
     "trainer": {
-        "epochs": 100,
+        "epochs": 30,
         "save_dir": "saved/",
         "save_freq": 10,
-        "verbosity": 1,
+        "verbosity": 2,
         "monitor": "val_loss",
         "monitor_mode": "min"
     },

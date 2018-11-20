@@ -1,19 +1,41 @@
 import torch
 
 
-def my_metric(output, target):
+def precision(y_pred, y_true, threshold=0.5, eps=1e-9):
     with torch.no_grad():
-        pred = torch.argmax(output, dim=1)
-        assert pred.shape[0] == len(target)
-        correct = 0
-        correct += torch.sum(pred == target).item()
-    return correct / len(target)
+        y_pred = torch.ge(y_pred.float(), threshold).float()
+        y_true = y_true.float()
 
-def my_metric2(output, target, k=3):
+        # 'dim=0' reduce along class dimension
+        # 'dim=1' reduce along per-sample dimension
+        true_positive = (y_pred * y_true).sum(dim=0)
+        prec = true_positive.div(y_pred.sum(dim=0).add(eps))
+    return prec
+
+def recall(y_pred, y_true, threshold=0.5, eps=1e-9):
     with torch.no_grad():
-        pred = torch.topk(output, k, dim=1)[1]
-        assert pred.shape[0] == len(target)
-        correct = 0
-        for i in range(k):
-            correct += torch.sum(pred[:, i] == target).item()
-    return correct / len(target)
+        y_pred = torch.ge(y_pred.float(), threshold).float()
+        y_true = y_true.float()
+
+        # 'dim=0' reduce along class dimension
+        # 'dim=1' reduce along per-sample dimension
+        true_positive = (y_pred * y_true).sum(dim=0)
+        precision = true_positive.div(y_pred.sum(dim=0).add(eps))
+        rec = true_positive.div(y_true.sum(dim=0).add(eps))    
+    return rec
+
+def fbeta_score(y_pred, y_true, beta=1, threshold=0.5, eps=1e-9):
+    with torch.no_grad():
+        beta2 = beta**2
+
+        y_pred = torch.ge(y_pred.float(), threshold).float()
+        y_true = y_true.float()
+
+        # 'dim=0' reduce along class dimension
+        # 'dim=1' reduce along per-sample dimension
+        true_positive = (y_pred * y_true).sum(dim=0)
+        precision = true_positive.div(y_pred.sum(dim=0).add(eps))
+        recall = true_positive.div(y_true.sum(dim=0).add(eps))
+        f_score = (precision*recall).div(precision.mul(beta2) + recall + eps).mul(1 + beta2)
+
+    return f_score
