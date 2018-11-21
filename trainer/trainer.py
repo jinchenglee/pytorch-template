@@ -21,7 +21,7 @@ class Trainer(BaseTrainer):
         self.valid_data_loader = valid_data_loader
         self.do_validation = self.valid_data_loader is not None
         self.lr_scheduler = lr_scheduler
-        self.log_step = int(np.sqrt(self.batch_size))
+        self.log_step = self.batch_size
         self.num_classes = num_classes
 
     def _eval_metrics(self, output, target):
@@ -79,7 +79,12 @@ class Trainer(BaseTrainer):
                     self.data_loader.n_samples,
                     100.0 * batch_idx / len(self.data_loader),
                     loss.item()))
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                if batch_idx % (100 * self.log_step):
+                    # Save only first 4 images of batch
+                    # self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                    self.writer.add_image('input', make_grid(data.cpu()[:4], nrow=1, normalize=True))
+                    self.writer.add_image('pred', make_grid(output.cpu()[:4], nrow=1, normalize=True))
+                    self.writer.add_image('target', make_grid(target.cpu()[:4], nrow=1, normalize=True))
 
         log = {
             'loss': total_loss / len(self.data_loader),
@@ -125,7 +130,11 @@ class Trainer(BaseTrainer):
 
                 # Less freq. image dumpping for faster validation
                 if batch_idx % self.log_step == 0:
-                    self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                    # Save only first 4 images of batch
+                    # self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                    self.writer.add_image('input', make_grid(data.cpu()[:4], nrow=1, normalize=True))
+                    self.writer.add_image('pred', make_grid(output.cpu()[:4], nrow=1, normalize=True))
+                    self.writer.add_image('target', make_grid(target.cpu()[:4], nrow=1, normalize=True))
 
         return {
             'val_loss': total_val_loss / len(self.valid_data_loader),

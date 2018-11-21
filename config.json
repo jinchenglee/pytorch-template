@@ -12,7 +12,7 @@
         "type": "MyDataLoader",
         "args":{
             "data_dir": "data/",
-            "train_csv_file": "train_v5_overfit.csv",
+            "train_csv_file": "train_v5.csv",
             "test_csv_file": "test_v5.csv",
             "batch_size": 60,
             "shuffle": true,
@@ -41,10 +41,10 @@
         }
     },
     "trainer": {
-        "epochs": 100,
+        "epochs": 10,
         "save_dir": "saved/",
-        "save_freq": 10,
-        "verbosity": 1,
+        "save_freq": 1,
+        "verbosity": 2,
         "monitor": "val_loss",
         "monitor_mode": "min"
     },
